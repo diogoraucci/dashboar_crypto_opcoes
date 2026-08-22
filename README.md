@@ -66,10 +66,17 @@ e marque a caixa "Atualizar automaticamente" que aparece na sidebar.
 
 ## Se algo não funcionar
 
-- **Rede bloqueando `api.binance.com` ou `www.deribit.com`**: o app roda
-  local no seu computador, então depende da sua conexão ter acesso a esses
-  domínios (nem toda VPN/firewall corporativo libera). Teste abrindo essas
-  URLs num navegador comum.
+- **Erro 451 da Binance**: não é firewall — é a própria Binance bloqueando
+  a região/IP de origem em `api.binance.com`. O app já tenta
+  automaticamente, em ordem, estes espelhos públicos até um funcionar:
+  `data-api.binance.vision` (espelho oficial só de market data, sem
+  geobloqueio), `api1.binance.com` a `api4.binance.com` e por último
+  `api.binance.com`. Se mesmo assim falhar, é sua rede/provedor bloqueando
+  todos esses domínios (comum em alguns firewalls corporativos/VPNs) — uma
+  VPN de outro país ou outra rede costuma resolver.
+- **Rede bloqueando `www.deribit.com`**: o app roda local no seu
+  computador, então depende da sua conexão ter acesso a esse domínio. Teste
+  abrindo essas URLs num navegador comum.
 - **"Nenhum vencimento futuro encontrado"**: a Deribit às vezes fica sem
   opções BTC/ETH com vencimento tão próximo quanto 2 dias (depende do
   calendário de listagem deles). Aumente o slider "Vencimento-alvo do GEX"
