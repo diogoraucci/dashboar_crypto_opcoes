@@ -17,7 +17,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-BINANCE_BASE = "https://api.binance.com"
+# A Binance retorna 451 (bloqueio geográfico) em api.binance.com pra várias
+# regiões/IPs (não é firewall local, é o próprio Binance recusando o
+# endereço de origem). Por isso tentamos, em ordem, vários espelhos que
+# servem os MESMOS dados públicos de mercado — o primeiro que responder
+# 200 é usado, e o resultado fica em cache (ver _BASE_BINANCE_OK) pra não
+# testar tudo de novo a cada chamada.
+BINANCE_BASES = [
+    "https://data-api.binance.vision",  # espelho oficial só de market data, sem geobloqueio
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+    "https://api4.binance.com",
+    "https://api.binance.com",
+]
 DERIBIT_BASE = "https://www.deribit.com/api/v2/public"
 
 # Ativos suportados pelo dashboard (só BTC e ETH, conforme pedido)
@@ -29,10 +42,38 @@ ATIVOS = {
 _session = requests.Session()
 _session.headers.update({"User-Agent": "dashboard-opcoes-cripto/1.0"})
 
+_base_binance_ok: str | None = None  # memoriza qual espelho funcionou
+
 
 # ---------------------------------------------------------------------------
 # BINANCE — cotações do ativo-objeto
 # ---------------------------------------------------------------------------
+
+def _get_binance(path: str, params: dict):
+    """Faz um GET num endpoint público da Binance, tentando vários espelhos
+    em sequência até um responder com sucesso (contorna o 451 de
+    geobloqueio de api.binance.com em certas regiões)."""
+    global _base_binance_ok
+    bases = [_base_binance_ok] + [b for b in BINANCE_BASES if b != _base_binance_ok] \
+        if _base_binance_ok else BINANCE_BASES
+
+    ultimo_erro = None
+    for base in bases:
+        try:
+            resp = _session.get(f"{base}{path}", params=params, timeout=15)
+            if resp.status_code == 200:
+                _base_binance_ok = base
+                return resp.json()
+            ultimo_erro = requests.HTTPError(
+                f"{resp.status_code} {resp.reason} em {base}{path}", response=resp)
+        except requests.RequestException as e:
+            ultimo_erro = e
+            continue
+    raise ConnectionError(
+        "Não foi possível acessar nenhum dos espelhos públicos da Binance "
+        f"({', '.join(BINANCE_BASES)}). Último erro: {ultimo_erro}"
+    )
+
 
 def obter_precos_binance(symbol: str, interval: str = "1d", limit: int = 300) -> pd.DataFrame:
     """Histórico de candles (klines) da Binance — GET /api/v3/klines.
@@ -40,11 +81,8 @@ def obter_precos_binance(symbol: str, interval: str = "1d", limit: int = 300) ->
     Retorna DataFrame ordenado do mais antigo pro mais recente, com colunas
     data / abertura / maxima / minima / fechamento / volume.
     """
-    resp = _session.get(f"{BINANCE_BASE}/api/v3/klines",
-                         params={"symbol": symbol, "interval": interval, "limit": limit},
-                         timeout=15)
-    resp.raise_for_status()
-    dados = resp.json()
+    dados = _get_binance("/api/v3/klines",
+                          {"symbol": symbol, "interval": interval, "limit": limit})
     df = pd.DataFrame(dados, columns=[
         "open_time", "abertura", "maxima", "minima", "fechamento", "volume",
         "close_time", "quote_volume", "n_trades", "taker_base", "taker_quote", "ignore",
@@ -57,9 +95,8 @@ def obter_precos_binance(symbol: str, interval: str = "1d", limit: int = 300) ->
 
 def obter_preco_atual_binance(symbol: str) -> float:
     """Último preço negociado — GET /api/v3/ticker/price."""
-    resp = _session.get(f"{BINANCE_BASE}/api/v3/ticker/price", params={"symbol": symbol}, timeout=10)
-    resp.raise_for_status()
-    return float(resp.json()["price"])
+    dados = _get_binance("/api/v3/ticker/price", {"symbol": symbol})
+    return float(dados["price"])
 
 
 # ---------------------------------------------------------------------------
