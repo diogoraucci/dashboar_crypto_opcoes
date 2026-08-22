@@ -198,8 +198,12 @@ def main():
     except Exception as e:
         st.error(
             f"Falha ao buscar cotações na Binance ({symbol}): {e}\n\n"
-            "Se estiver rodando em um servidor/rede que bloqueia api.binance.com, "
-            "verifique as configurações de rede/firewall.")
+            "O app já tenta automaticamente vários espelhos públicos da Binance "
+            "(data-api.binance.vision, api1-4.binance.com, api.binance.com) — se "
+            "todos falharem, é provável que sua rede/provedor esteja bloqueando "
+            "esses domínios (firewall corporativo, VPN, etc). Teste abrir "
+            "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCUSDT "
+            "direto no navegador para confirmar.")
         return
 
     try:
