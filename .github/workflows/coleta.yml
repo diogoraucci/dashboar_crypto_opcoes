@@ -1,1 +1,40 @@
-teste
+name: Coleta de dados (Binance + Deribit)
+
+on:
+  schedule:
+    # A cada 15 minutos. Cron do GitHub Actions é sempre em UTC.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow" na aba Actions
+
+permissions:
+  contents: write   # necessário pra o job poder commitar/dar push em data/
+
+concurrency:
+  group: coleta-dados
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: pip install -r requirements-coleta.txt
+
+      - name: Rodar coleta (Binance + Deribit -> data/)
+        run: python coletar_dados.py
+
+      - name: Publicar dados atualizados
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "chore: atualizar dados de mercado [skip ci]"
+          git push
