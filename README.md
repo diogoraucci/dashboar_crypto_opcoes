@@ -120,6 +120,37 @@ cron no seu próprio servidor, por exemplo) em vez do GitHub Actions.
 - Os dados **não são tick-a-tick em tempo real** — refletem o horário da
   última coleta do GitHub Actions (mostrado no topo do dashboard).
 
+## Notas sobre o painel de Preço, Volatilidade e RSI
+
+Réplica do painel do dashboard original (script OMSF/NoTrend), adaptada
+pra cripto — usando **365** como janela rolante em vez dos **252** dias
+úteis de bolsa tradicional (cripto negocia todo santo dia, sem fim de
+semana):
+
+- **Média móvel com seletor**: a sidebar tem um slider "Período (Média
+  Móvel)" (20 a 300, padrão 50) — define a janela da média móvel simples
+  usada como linha de base (baseline) das bandas do gráfico de preço.
+- **Bandas de desvio-padrão**: baseline ± 1/2/3 desvios-padrão, calculados
+  em **janela rolante de 365 períodos** sobre o log-preço normalizado
+  (log-preço − baseline), projetadas de volta pra escala de US$.
+- **Volatilidade histórica com quartis rolantes**: a linha de volatilidade
+  anualizada (rolling 30 dias, anualizada por √365) vem acompanhada de uma
+  banda sombreada com os **quantis 0.2 e 0.8**, também calculados em
+  **janela rolante de 365 períodos** — mostra se a vol de hoje está
+  historicamente alta ou baixa frente ao regime recente (não à série toda).
+- **RSI em janela rolante de 365 períodos**: além do RSI(14) padrão de
+  mercado, o gráfico traz o **RSI(365)** — o mesmo oscilador, calculado com
+  lookback de ~1 ano, pra medir momentum de prazo mais longo.
+- Card **"REGIME DE VOL."** no painel esquerdo: classifica a vol. atual
+  como ALTA (acima do quantil 0.8 rolante), BAIXA (abaixo do quantil 0.2)
+  ou NEUTRA.
+- Essas métricas rolantes de 365 períodos só aparecem depois que o
+  histórico acumulado em `data/precos_{ativo}.csv` tiver pelo menos ~180
+  candles diários (`MIN_PERIODOS_ROLANTE`) — por isso o coletor
+  (`coletar_dados.py`) já busca **1000 candles diários** da Binance (o
+  máximo por chamada) em vez de 300, pra ter histórico suficiente desde a
+  primeira coleta.
+
 ## Se algo não funcionar
 
 - **"Arquivo não encontrado" no Streamlit**: o workflow ainda não rodou

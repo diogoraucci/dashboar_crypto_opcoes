@@ -51,7 +51,11 @@ def coletar_ativo(ativo: str) -> None:
     currency = cd.ATIVOS[ativo]["deribit_currency"]
 
     print(f"[{ativo}] Buscando cotações na Binance ({symbol})...")
-    precos = cd.obter_precos_binance(symbol, "1d", 300)
+    # 1000 candles diários (máximo permitido por chamada da Binance) — precisa
+    # de bastante histórico pra alimentar as janelas ROLANTES de 365 períodos
+    # (RSI longo, quartis de volatilidade, desvio-padrão das bandas de preço).
+    # Com 300 candles essas métricas ficariam quase todas em branco (NaN).
+    precos = cd.obter_precos_binance(symbol, "1d", 1000)
     spot = cd.obter_preco_atual_binance(symbol)
     print(f"[{ativo}] Spot: {spot:,.2f}")
 

@@ -93,6 +93,11 @@ def _sidebar():
     st.sidebar.markdown("### ⚙️ Configuração")
     ativo = st.sidebar.radio("Ativo", ATIVOS, horizontal=True)
 
+    period = st.sidebar.slider(
+        "Período (Média Móvel)", min_value=20, max_value=300, value=50, step=5,
+        help="Janela da média móvel usada como baseline das bandas de "
+             "desvio-padrão no gráfico de preço.")
+
     with st.sidebar.expander("Repositório de dados", expanded=False):
         base = st.text_input(
             "URL base (raw.githubusercontent.com/.../data)",
@@ -117,7 +122,7 @@ def _sidebar():
     st.sidebar.caption(
         "Dados publicados via GitHub Actions (coletar_dados.py) a partir da "
         f"Binance e Deribit. Cache local de leitura: {TTL_LEITURA}s.")
-    return ativo, base
+    return ativo, base, period
 
 
 # ----------------------------------------------------------------------------
@@ -142,6 +147,32 @@ def _metricas_contrato(opcao: dict, spot: float):
         gd._card_box("OPEN INTEREST", f"{opcao['open_interest']:,.1f}"),
     ])
     st.html(f'<div class="boxes-row">{linha2}</div>')
+
+
+def _metricas_precos(precos_ind: pd.DataFrame):
+    """Cards de RSI curto/longo e volatilidade histórica + posição frente às
+    bandas de quartil rolantes (365 períodos)."""
+    ultima = precos_ind.iloc[-1]
+
+    def _pos_quartil(valor, q20, q80):
+        if pd.isna(valor) or pd.isna(q20) or pd.isna(q80):
+            return "—", CORES["fraco"]
+        if valor >= q80:
+            return "ALTA (>p80)", CORES["baixa"]
+        if valor <= q20:
+            return "BAIXA (<p20)", CORES["alta"]
+        return "NEUTRA", CORES["fraco"]
+
+    regime_vol, cor_vol = _pos_quartil(ultima["hv_anualizada"], ultima["hv_q20_365"], ultima["hv_q80_365"])
+
+    st.html('<div class="subtitulo">Preço &bull; RSI &bull; Volatilidade</div>')
+    linha = "".join([
+        gd._card_box("RSI (14)", f"{ultima['rsi']:.1f}"),
+        gd._card_box("RSI (365, rolante)", f"{ultima['rsi_365']:.1f}"),
+        gd._card_box("VOL. ANUALIZADA", f"{ultima['hv_anualizada']:.1f}%" if pd.notna(ultima["hv_anualizada"]) else "—"),
+        gd._card_box("REGIME DE VOL.", regime_vol, cor_vol),
+    ])
+    st.html(f'<div class="boxes-row">{linha}</div>')
 
 
 def _metricas_gex(gex: dict, ticker: str, vencimento_alvo: pd.Timestamp):
@@ -185,13 +216,14 @@ def _metricas_gex(gex: dict, ticker: str, vencimento_alvo: pd.Timestamp):
 
 def main():
     _injetar_tema()
-    ativo, base = _sidebar()
+    ativo, base, period = _sidebar()
 
     try:
         meta = _meta_repo(base, ativo)
         precos = _precos_repo(base, ativo)
         cadeia_completa = _opcoes_repo(base, ativo)
         precos_ind = m.calcular_indicadores_precos(precos)
+        bandas = m.calcular_bandas_desvio_padrao(precos_ind, period)
     except Exception as e:
         st.error(
             f"Falha ao ler os dados publicados no repositório para {ativo}: {e}\n\n"
@@ -200,6 +232,13 @@ def main():
             "`data/`). Se você acabou de configurar o repositório, rode o "
             "workflow manualmente (\"Run workflow\") e aguarde ele terminar.")
         return
+
+    if precos_ind["hv_q20_365"].isna().all():
+        st.warning(
+            "Histórico de preços curto demais pra calcular as bandas de quartil "
+            "(janela rolante de 365 períodos) — elas vão aparecer conforme o "
+            "GitHub Actions acumular mais candles diários publicados em `data/`.",
+            icon="⚠️")
 
     spot = float(meta.get("spot", precos["fechamento"].iloc[-1]))
 
@@ -237,14 +276,27 @@ def main():
     with col_esq:
         with st.container(border=True):
             _metricas_contrato(opcao, spot)
+            _metricas_precos(precos_ind)
             st.divider()
             _metricas_gex(gex, ativo, vencimento_alvo)
 
     with col_dir:
         with st.container(border=True):
-            st.plotly_chart(gd.fig_preco_rsi(precos_ind, f"{ativo}USDT"),
+            st.plotly_chart(gd.fig_preco_vol_rsi(precos_ind, bandas, f"{ativo}USDT", period),
                              use_container_width=True, config={"displayModeBar": False},
-                             key="fig_preco_rsi")
+                             key="fig_preco_vol_rsi")
+            st.html(
+                '<div class="disclaimer">Painel de preço: baseline (linha azul tracejada) = '
+                f'média móvel simples de {period} períodos sobre o log-preço normalizado '
+                '(seletor "Período (Média Móvel)" na sidebar); bandas verde/amarela/vermelha = '
+                'baseline &plusmn; 1/2/3 desvios-padrão em JANELA ROLANTE de 365 períodos de '
+                '(log-preço &minus; baseline), convertidas de volta pra escala de preço (US$). '
+                'Painel de volatilidade: linha = volatilidade histórica anualizada (rolling 30 '
+                'dias, anualizada por &radic;365); banda sombreada = quantis 0.2 e 0.8 da própria '
+                'volatilidade, calculados em JANELA ROLANTE de 365 períodos — mostra se a vol de '
+                'hoje está alta/baixa frente ao regime recente. Painel de RSI: RSI(14) padrão de '
+                'mercado + RSI(365) calculado com janela rolante longa, pra momentum de prazo '
+                'mais largo.</div>')
             st.plotly_chart(gd.fig_gex_profile(gex, f"{ativo}USDT"),
                              use_container_width=True, config={"displayModeBar": False},
                              key="fig_gex")

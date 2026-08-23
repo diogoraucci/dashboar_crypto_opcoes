@@ -104,19 +104,58 @@ def fig_gex_profile(gex: dict, ticker: str) -> go.Figure:
     return _layout_base(fig, altura=400)
 
 
-def fig_preco_rsi(precos_ind: pd.DataFrame, ticker: str) -> go.Figure:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28],
-                         vertical_spacing=0.05)
+def fig_preco_vol_rsi(precos_ind: pd.DataFrame, bandas: pd.DataFrame, ticker: str,
+                       period: int) -> go.Figure:
+    """3 painéis empilhados: (1) Preço + média móvel (seletor) + bandas de
+    desvio-padrão rolante; (2) Volatilidade histórica anualizada + bandas de
+    quartil 0.2/0.8 em janela rolante de 365 períodos; (3) RSI curto (14) e
+    RSI de janela rolante longa (365 períodos)."""
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
+                         row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.04)
 
+    # ---- Painel 1: preço + média móvel + bandas de desvio-padrão ----
+    fig.add_scatter(x=bandas["data"], y=bandas["banda+3"], name="+3σ",
+                     line=dict(color=CORES["baixa"], width=0.8, dash="dot"),
+                     showlegend=False, row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda-3"], name="-3σ",
+                     line=dict(color=CORES["baixa"], width=0.8, dash="dot"),
+                     showlegend=False, row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda+2"], name="+2σ",
+                     line=dict(color="#e0b23f", width=0.9, dash="dash"),
+                     showlegend=False, row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda-2"], name="-2σ",
+                     line=dict(color="#e0b23f", width=0.9, dash="dash"),
+                     showlegend=False, row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda-1"], name="±1σ",
+                     line=dict(color=CORES["alta"], width=1), showlegend=False, row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda+1"], name="±1σ (janela rolante 365)",
+                     line=dict(color=CORES["alta"], width=1), fill="tonexty",
+                     fillcolor="rgba(46,204,113,0.08)", row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda_0"], name=f"Média móvel ({period})",
+                     line=dict(color=CORES["neutro"], width=1.3, dash="dash"), row=1, col=1)
     fig.add_scatter(x=precos_ind["data"], y=precos_ind["fechamento"], name="Fechamento",
-                     line=dict(color=CORES["neutro"], width=1.6), row=1, col=1)
+                     line=dict(color=CORES["texto"], width=1.7), row=1, col=1)
 
+    # ---- Painel 2: volatilidade histórica + bandas de quartil rolantes ----
+    fig.add_scatter(x=precos_ind["data"], y=precos_ind["hv_q80_365"], name="Quartil 0.8",
+                     line=dict(color=CORES["baixa"], width=0.9, dash="dot"),
+                     showlegend=True, row=2, col=1)
+    fig.add_scatter(x=precos_ind["data"], y=precos_ind["hv_q20_365"], name="Quartil 0.2 - 0.8 (rolante, 365)",
+                     line=dict(color=CORES["alta"], width=0.9, dash="dot"), fill="tonexty",
+                     fillcolor="rgba(77,157,255,0.10)", row=2, col=1)
+    fig.add_scatter(x=precos_ind["data"], y=precos_ind["hv_anualizada"], name="Vol. hist. anualizada",
+                     line=dict(color=CORES["neutro"], width=1.5), row=2, col=1)
+
+    # ---- Painel 3: RSI curto (14) + RSI de janela rolante longa (365) ----
     fig.add_scatter(x=precos_ind["data"], y=precos_ind["rsi"], name="RSI(14)",
-                     line=dict(color="#c98bf0", width=1.4), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dot", line_color=CORES["baixa"], row=2, col=1)
-    fig.add_hline(y=30, line_dash="dot", line_color=CORES["alta"], row=2, col=1)
+                     line=dict(color="#c98bf0", width=1.4), row=3, col=1)
+    fig.add_scatter(x=precos_ind["data"], y=precos_ind["rsi_365"], name="RSI(365, rolante)",
+                     line=dict(color=CORES["neutro"], width=1.2, dash="dash"), row=3, col=1)
+    fig.add_hline(y=70, line_dash="dot", line_color=CORES["baixa"], row=3, col=1)
+    fig.add_hline(y=30, line_dash="dot", line_color=CORES["alta"], row=3, col=1)
 
-    fig.update_layout(title=f"Preço & RSI — {ticker}")
+    fig.update_layout(title=f"Preço, Volatilidade & RSI — {ticker}")
     fig.update_yaxes(title="Preço (US$)", row=1, col=1)
-    fig.update_yaxes(title="RSI", range=[0, 100], row=2, col=1)
-    return _layout_base(fig, altura=460)
+    fig.update_yaxes(title="Vol. anual. (%)", row=2, col=1)
+    fig.update_yaxes(title="RSI", range=[0, 100], row=3, col=1)
+    return _layout_base(fig, altura=620)

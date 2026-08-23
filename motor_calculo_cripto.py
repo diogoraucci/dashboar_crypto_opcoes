@@ -13,39 +13,97 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-DIAS_ANO_CRIPTO = 365  # cripto negocia 24/7 -> anualização com 365 dias
+DIAS_ANO_CRIPTO = 365   # cripto negocia 24/7 -> anualização com 365 dias
+JANELA_ROLANTE = 365    # janela rolante padrão (RSI longo, quartis de vol) — equivalente
+                         # cripto do rolling(252) usado em ações (252 = dias úteis de bolsa;
+                         # 365 = dias corridos, já que cripto não tem fim de semana)
+MIN_PERIODOS_ROLANTE = 180  # começa a exibir métricas rolantes de 365 já com ~6 meses de histórico
 
 
 # ---------------------------------------------------------------------------
-# INDICADORES DE PREÇO (RSI + volatilidade histórica)
+# RSI (genérico, usado tanto pro RSI curto quanto pro RSI de janela longa)
+# ---------------------------------------------------------------------------
+
+def _rsi(fechamento: pd.Series, janela: int) -> pd.Series:
+    delta = fechamento.diff()
+    ganho = delta.clip(lower=0)
+    perda = -delta.clip(upper=0)
+    media_ganho = ganho.ewm(alpha=1 / janela, min_periods=janela, adjust=False).mean()
+    media_perda = perda.ewm(alpha=1 / janela, min_periods=janela, adjust=False).mean()
+    rs = media_ganho / media_perda.replace(0, np.nan)
+    return (100 - (100 / (1 + rs))).fillna(50)
+
+
+# ---------------------------------------------------------------------------
+# INDICADORES DE PREÇO (RSI curto + RSI de janela rolante longa + volatilidade
+# histórica com bandas de quartil rolantes)
 # ---------------------------------------------------------------------------
 
 def calcular_indicadores_precos(precos: pd.DataFrame, janela_rsi: int = 14,
-                                 janela_hv: int = 30) -> pd.DataFrame:
+                                 janela_hv: int = 30, janela_rolante: int = JANELA_ROLANTE,
+                                 min_periodos_rolante: int = MIN_PERIODOS_ROLANTE) -> pd.DataFrame:
     df = precos.copy().sort_values("data").reset_index(drop=True)
 
-    delta = df["fechamento"].diff()
-    ganho = delta.clip(lower=0)
-    perda = -delta.clip(upper=0)
-    media_ganho = ganho.ewm(alpha=1 / janela_rsi, min_periods=janela_rsi, adjust=False).mean()
-    media_perda = perda.ewm(alpha=1 / janela_rsi, min_periods=janela_rsi, adjust=False).mean()
-    rs = media_ganho / media_perda.replace(0, np.nan)
-    df["rsi"] = (100 - (100 / (1 + rs))).fillna(50)
+    # RSI "curto" (14, padrão de mercado) e RSI de JANELA ROLANTE LONGA (365
+    # períodos) — mesmo oscilador, só que calculado com lookback de ~1 ano,
+    # pra captar momentum de prazo mais longo (a versão cripto do que
+    # normalmente seria feito com 252 dias úteis em ações).
+    df["rsi"] = _rsi(df["fechamento"], janela_rsi)
+    df["rsi_365"] = _rsi(df["fechamento"], janela_rolante)
 
+    # Volatilidade histórica anualizada (rolling 30 dias de log-retorno, anualizada por sqrt(365))
     log_ret = np.log(df["fechamento"] / df["fechamento"].shift(1))
     df["hv_anualizada"] = log_ret.rolling(janela_hv).std() * np.sqrt(DIAS_ANO_CRIPTO) * 100
 
-    hv_valida = df["hv_anualizada"].dropna()
-    if len(hv_valida) >= 30:
-        df["hv_rank"] = hv_valida.rank(pct=True).reindex(df.index) * 100
-        base = hv_valida.tail(min(len(hv_valida), 365))
-        df["hv_percentil"] = df["hv_anualizada"].apply(
-            lambda v: (base < v).mean() * 100 if pd.notna(v) else np.nan)
-    else:
-        df["hv_rank"] = np.nan
-        df["hv_percentil"] = np.nan
+    # Bandas de quartil da volatilidade, em JANELA ROLANTE (365 períodos):
+    # a cada dia, olha só pros últimos 365 valores de HV e calcula onde ficam
+    # o quantil 0.2 e o quantil 0.8 dessa janela — mostra se a vol de hoje
+    # está "alta" ou "baixa" frente ao próprio histórico recente (não frente
+    # à série toda, que ficaria estática e não se adaptaria a novos regimes).
+    hv_rolante = df["hv_anualizada"].rolling(janela_rolante, min_periods=min_periodos_rolante)
+    df["hv_q20_365"] = hv_rolante.quantile(0.2)
+    df["hv_q80_365"] = hv_rolante.quantile(0.8)
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# BANDAS DE MÉDIA MÓVEL + DESVIO-PADRÃO (préço) — réplica do script
+# OMSF/NoTrend original, com o período da média móvel ajustável (seletor na
+# sidebar) e o desvio-padrão calculado em JANELA ROLANTE.
+# ---------------------------------------------------------------------------
+
+def calcular_bandas_desvio_padrao(precos_ind: pd.DataFrame, period: int,
+                                   janela_std: int = JANELA_ROLANTE) -> pd.DataFrame:
+    """
+    1) Normaliza o fechamento em log: log(close / close[0]).
+    2) Média móvel SIMPLES (rolling) do log-preço, janela = `period` — é o
+       valor escolhido no seletor "Período (Média Móvel)" da sidebar.
+    3) close_no_trend = log-preço - média móvel.
+    4) Desvio-padrão ROLANTE (janela = `janela_std`, padrão 365 períodos —
+       equivalente cripto do rolling(252) usado no script original de ações)
+       de close_no_trend.
+    5) Bandas = média móvel ± N × desvio-padrão (N = 1, 2, 3), calculadas em
+       escala log e projetadas de volta pra escala de preço via exp(), pra
+       sobrepor corretamente o gráfico de preço em US$.
+    """
+    close = precos_ind["fechamento"]
+    preco_base = float(close.iloc[0])
+
+    log_close = np.log(close / preco_base)
+    media_movel = log_close.rolling(period).mean()
+    close_no_trend = log_close - media_movel
+    std = close_no_trend.rolling(janela_std, min_periods=max(30, janela_std // 4)).std()
+
+    bandas_log = pd.DataFrame(index=precos_ind.index)
+    bandas_log["banda_0"] = media_movel
+    for n in (1, 2, 3):
+        bandas_log[f"banda+{n}"] = media_movel + std * n
+        bandas_log[f"banda-{n}"] = media_movel - std * n
+
+    bandas = np.exp(bandas_log) * preco_base
+    bandas["data"] = precos_ind["data"].values
+    return bandas
 
 
 # ---------------------------------------------------------------------------
