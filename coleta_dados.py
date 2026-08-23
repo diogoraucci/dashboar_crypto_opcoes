@@ -123,7 +123,11 @@ def obter_instrumentos_opcoes(currency: str) -> pd.DataFrame:
     """Todos os instrumentos de opções ABERTOS (não expirados) — GET
     /public/get_instruments?currency=BTC&kind=option&expired=false."""
     resultado = _get_deribit("get_instruments", {
-        "currency": currency, "kind": "option", "expired": False,
+        # IMPORTANTE: a Deribit espera "false"/"true" em minúsculas na
+        # query string. Um bool do Python (False) vira "False" (maiúsculo)
+        # quando o requests monta a URL, e a Deribit responde 400 Bad
+        # Request pra esse valor — por isso a string minúscula explícita.
+        "currency": currency, "kind": "option", "expired": "false",
     })
     df = pd.DataFrame(resultado)
     if df.empty:

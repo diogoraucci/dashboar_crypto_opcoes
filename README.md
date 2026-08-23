@@ -1,86 +1,137 @@
-# Dashboard de Opções Cripto — BTCUSDT / ETHUSDT (ao vivo)
+# Dashboard de Opções Cripto — BTCUSDT / ETHUSDT
 
-Versão do seu dashboard de opções focada **só em BTC e ETH**, com dados
-coletados **em tempo real**, sem CSVs nem planilhas:
+Dashboard focado só em **BTC e ETH**, com GEX calculado usando **opções
+curtas** (vencimento mais próximo de hoje + 2 dias).
 
-- **Cotações** (preço à vista, histórico, RSI): direto da **Binance**
-  (`api.binance.com`, endpoints públicos, sem chave de API).
-- **Cadeia de opções** (IV, gregas, open interest): direto da **Deribit**
-  (`www.deribit.com`, endpoints públicos, sem chave de API).
-- **GEX**: calculado usando **opções curtas**, com vencimento mais próximo
-  de **hoje + 2 dias** (ajustável na sidebar, de 0.5 a 14 dias).
+## Arquitetura (plano B — coleta desacoplada do Streamlit)
+
+O Streamlit **não chama mais a Binance/Deribit diretamente**. Em vez
+disso:
+
+```
+GitHub Actions (a cada 15 min)     data/*.csv, data/*.json      Streamlit app
+coletar_dados.py                -> publicados no próprio     -> lê via
+-> Binance + Deribit               repositório (git push)       raw.githubusercontent.com
+                                                                  (leitura_repo.py)
+```
+
+Isso resolve dois problemas que você bateu rodando tudo dentro do
+Streamlit:
+
+- **Erro 451 da Binance**: bloqueio geográfico de `api.binance.com` em
+  certos IPs/regiões de hospedagem do Streamlit.
+- **Erro 400 da Deribit**: bug do parâmetro `expired=False` sendo
+  serializado errado (já corrigido também no `coleta_dados.py`).
+
+Como o GitHub Actions roda em servidores próprios do GitHub (normalmente
+sem esses bloqueios) e o Streamlit passa a só baixar arquivos estáticos do
+`raw.githubusercontent.com`, o dashboard fica muito mais resiliente.
 
 ## Arquivos
 
-| Arquivo | Função |
-|---|---|
-| `coleta_dados.py` | Busca cotações na Binance e cadeia de opções na Deribit |
-| `motor_calculo_cripto.py` | Calcula GEX por strike, gamma flip, walls, PCR, IV skew, RSI, volatilidade histórica |
-| `dashboard_cripto.py` | Gera os gráficos (Plotly) e os cards/tabelas HTML |
-| `streamlit_app_cripto.py` | App principal — rodar este |
-| `requirements.txt` | Dependências |
+| Arquivo | Onde roda | Função |
+|---|---|---|
+| `coleta_dados.py` | GitHub Actions | Funções de baixo nível: fala com Binance e Deribit |
+| `coletar_dados.py` | GitHub Actions | Script principal da coleta — escreve em `data/` |
+| `.github/workflows/coleta.yml` | GitHub Actions | Agenda a coleta (cron a cada 15 min) e publica (`git push`) |
+| `data/precos_{BTC,ETH}.csv` | — | Histórico de candles (Binance) |
+| `data/opcoes_{BTC,ETH}.csv` | — | Cadeia de opções curtas, 1-3 vencimentos (Deribit) |
+| `data/meta_{BTC,ETH}.json` | — | Timestamp da coleta, spot no momento, vencimentos disponíveis |
+| `leitura_repo.py` | Streamlit | Lê `data/*.csv` e `data/*.json` via `raw.githubusercontent.com` |
+| `motor_calculo_cripto.py` | Streamlit | Calcula GEX, gamma flip, walls, PCR, IV skew, RSI, volatilidade |
+| `dashboard_cripto.py` | Streamlit | Gráficos (Plotly) e cards HTML |
+| `streamlit_app_cripto.py` | Streamlit | App principal — rodar/hospedar este |
+| `requirements-coleta.txt` | GitHub Actions | Dependências mínimas do job de coleta |
+| `requirements.txt` | Streamlit | Dependências do app |
 
-## Como rodar
+## Como configurar no seu repositório
+
+Seu repositório já é `diogoraucci/dashboar_crypto_opcoes` — os arquivos
+já apontam pra ele por padrão (`leitura_repo.GITHUB_RAW_BASE_PADRAO`).
+Passos:
+
+1. **Suba estes arquivos** para a raiz do repositório (substituindo os
+   antigos `coleta_dados.py`, `streamlit_app_cripto.py`, etc.), mantendo a
+   estrutura de pastas — incluindo `.github/workflows/coleta.yml` e a
+   pasta `data/` (pode ficar só com o `.gitkeep` por enquanto).
+
+2. **Habilite permissão de escrita pro workflow**: em
+   `Settings → Actions → General → Workflow permissions`, marque
+   **"Read and write permissions"** e salve. Sem isso o `git push` do
+   workflow falha com permissão negada.
+
+3. **Rode a coleta pela primeira vez manualmente**: aba **Actions** do
+   repositório → workflow **"Coleta de dados (Binance + Deribit)"** →
+   botão **"Run workflow"**. Acompanhe o log — ele deve terminar
+   publicando `data/precos_BTC.csv`, `data/opcoes_BTC.csv`,
+   `data/meta_BTC.json` (e os equivalentes de ETH) com um commit
+   automático.
+
+4. Depois do primeiro sucesso, o cron (`*/15 * * * *`, a cada 15 minutos)
+   assume sozinho.
+
+5. **Rode o Streamlit** (local ou no Streamlit Community Cloud):
+
+   ```bash
+   pip install -r requirements.txt
+   streamlit run streamlit_app_cripto.py
+   ```
+
+   Ele vai buscar os dados direto de
+   `https://raw.githubusercontent.com/diogoraucci/dashboar_crypto_opcoes/main/data/...`
+   — não precisa rodar no mesmo lugar que o GitHub Actions.
+
+## Rodando a coleta localmente (sem esperar o Actions)
 
 ```bash
-pip install -r requirements.txt
-streamlit run streamlit_app_cripto.py
+pip install -r requirements-coleta.txt
+python coletar_dados.py
 ```
 
-Abra o link que o Streamlit imprime no terminal (normalmente
-`http://localhost:8501`). Na sidebar você escolhe **BTC** ou **ETH**, o
-**vencimento-alvo** do GEX (padrão: 2 dias) e o timeframe do gráfico de
-preço.
+Isso já popula a pasta `data/` localmente — útil pra testar antes de
+mexer no workflow, ou se você preferir rodar a coleta em outro lugar (um
+cron no seu próprio servidor, por exemplo) em vez do GitHub Actions.
 
-## Atualização automática (opcional)
+## Sidebar do Streamlit
 
-Por padrão, os dados ficam em cache local por 30 segundos e você atualiza
-clicando em **"🔄 Atualizar agora"** na sidebar. Se quiser atualização
-automática a cada 30s sem precisar clicar, instale:
-
-```bash
-pip install streamlit-autorefresh
-```
-
-e marque a caixa "Atualizar automaticamente" que aparece na sidebar.
+- **Ativo**: BTC ou ETH.
+- **Vencimento (GEX)**: dropdown com os vencimentos que o Actions coletou
+  (por padrão, o mais próximo de "hoje + 2 dias" e até 2 vizinhos
+  cronológicos).
+- **Repositório de dados** (expansível): URL base caso você tenha feito um
+  fork do repositório com outro nome/branch.
+- **Atualizar agora**: limpa o cache local (60s) e força reler os arquivos
+  do GitHub.
+- **Atualizar automaticamente**: precisa de
+  `pip install streamlit-autorefresh` (opcional).
 
 ## Notas sobre o cálculo do GEX
 
 - Convenção padrão de trackers públicos de GEX: dealers líquidos
   **COMPRADOS em calls** (+gamma) e **VENDIDOS em puts** (-gamma).
-- Gamma e demais gregas usados vêm **direto do modelo de precificação da
-  própria Deribit** (campo `greeks` do endpoint `public/ticker`) — não
-  recalculamos Black-Scholes por fora, para não misturar duas fontes de
-  volatilidade implícita diferentes.
-- `GEX_strike = Σ (±1 × gamma × open_interest × spot² × 0.01)` — ou seja,
-  a variação em US$ da exposição a gamma dos dealers para uma variação de
-  1% no spot.
-- **Gamma Flip**: strike onde o GEX acumulado (somado do menor pro maior
-  strike) cruza zero (interpolado linearmente).
-- **Call Wall / Put Wall**: strike com o maior GEX positivo (calls) / mais
-  negativo (puts).
-- **PCR**: razão entre open interest de puts e de calls no vencimento
-  escolhido.
+- Gamma e demais gregas vêm **direto do modelo de precificação da própria
+  Deribit** (campo `greeks` do endpoint `public/ticker`).
+- `GEX_strike = Σ (±1 × gamma × open_interest × spot² × 0.01)`.
+- **Gamma Flip**: strike onde o GEX acumulado cruza zero (interpolado).
+- **Call Wall / Put Wall**: strike com maior GEX positivo / mais negativo.
+- **PCR**: open interest de puts ÷ open interest de calls.
 - **IV Skew**: IV média das puts OTM menos IV média das calls OTM, dentro
-  de uma banda de ±5% do spot.
+  de ±5% do spot.
+- Os dados **não são tick-a-tick em tempo real** — refletem o horário da
+  última coleta do GitHub Actions (mostrado no topo do dashboard).
 
 ## Se algo não funcionar
 
-- **Erro 451 da Binance**: não é firewall — é a própria Binance bloqueando
-  a região/IP de origem em `api.binance.com`. O app já tenta
-  automaticamente, em ordem, estes espelhos públicos até um funcionar:
-  `data-api.binance.vision` (espelho oficial só de market data, sem
-  geobloqueio), `api1.binance.com` a `api4.binance.com` e por último
-  `api.binance.com`. Se mesmo assim falhar, é sua rede/provedor bloqueando
-  todos esses domínios (comum em alguns firewalls corporativos/VPNs) — uma
-  VPN de outro país ou outra rede costuma resolver.
-- **Rede bloqueando `www.deribit.com`**: o app roda local no seu
-  computador, então depende da sua conexão ter acesso a esse domínio. Teste
-  abrindo essas URLs num navegador comum.
-- **"Nenhum vencimento futuro encontrado"**: a Deribit às vezes fica sem
-  opções BTC/ETH com vencimento tão próximo quanto 2 dias (depende do
-  calendário de listagem deles). Aumente o slider "Vencimento-alvo do GEX"
-  na sidebar para pegar o próximo vencimento disponível.
-- **"Cadeia de opções sem gregas/open interest suficientes"**: pode
-  acontecer em vencimentos com pouquíssima liquidez (poucos strikes
-  negociados). Tente outro vencimento-alvo.
+- **"Arquivo não encontrado" no Streamlit**: o workflow ainda não rodou
+  com sucesso. Veja a aba Actions do repositório e rode manualmente
+  ("Run workflow").
+- **Workflow falha no `git push`**: falta a permissão de escrita — revise
+  o passo 2 acima (Settings → Actions → General → Workflow permissions).
+- **Erro 451/400 mesmo assim**: só pode acontecer dentro do job do GitHub
+  Actions agora (não mais no Streamlit). Olhe o log do job em Actions —
+  se for 451 da Binance, o `coleta_dados.py` já tenta vários espelhos
+  (`data-api.binance.vision`, `api1-4.binance.com`, `api.binance.com`) em
+  sequência antes de desistir.
+- **Um dos dois ativos não atualiza**: o script só falha o job inteiro se
+  **ambos** (BTC e ETH) derem erro na mesma rodada — um problema pontual
+  num só ativo não trava o outro. Veja o log do job pra identificar qual.

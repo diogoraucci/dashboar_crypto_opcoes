@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-import coleta_dados as cd
+import leitura_repo as lr
 import motor_calculo_cripto as m
 import dashboard_cripto as gd
 
@@ -33,8 +33,8 @@ except ImportError:
 CORES = gd.CORES
 st.set_page_config(page_title="Dashboard Cripto — Opções BTC/ETH", page_icon="₿", layout="wide")
 
-TTL_COTACOES = 30  # segundos de cache local das cotações (Binance)
-TTL_OPCOES = 30    # segundos de cache local da cadeia de opções (Deribit)
+ATIVOS = ["BTC", "ETH"]
+TTL_LEITURA = 60  # segundos de cache local da leitura do GitHub
 
 
 # ----------------------------------------------------------------------------
@@ -66,26 +66,23 @@ def _injetar_tema():
 
 
 # ----------------------------------------------------------------------------
-# WRAPPERS CACHEADOS — cache local curto (TTL) pra não martelar as APIs a
-# cada interação da sidebar, mas ainda assim manter os dados "ao vivo".
+# WRAPPERS CACHEADOS — leem os arquivos já coletados e publicados no
+# GitHub (data/*.csv, data/*.json), nunca chamam Binance/Deribit direto.
 # ----------------------------------------------------------------------------
 
-@st.cache_data(ttl=TTL_COTACOES, show_spinner="Buscando cotações na Binance...")
-def _precos_binance(symbol: str, interval: str, limit: int) -> pd.DataFrame:
-    return cd.obter_precos_binance(symbol, interval, limit)
+@st.cache_data(ttl=TTL_LEITURA, show_spinner="Lendo cotações publicadas no repositório...")
+def _precos_repo(base: str, ativo: str) -> pd.DataFrame:
+    return lr.ler_precos(base, ativo)
 
 
-@st.cache_data(ttl=TTL_COTACOES, show_spinner=False)
-def _preco_atual_binance(symbol: str) -> float:
-    return cd.obter_preco_atual_binance(symbol)
+@st.cache_data(ttl=TTL_LEITURA, show_spinner="Lendo cadeia de opções publicada no repositório...")
+def _opcoes_repo(base: str, ativo: str) -> pd.DataFrame:
+    return lr.ler_opcoes(base, ativo)
 
 
-@st.cache_data(ttl=TTL_OPCOES, show_spinner="Buscando cadeia de opções na Deribit...")
-def _cadeia_deribit(currency: str, dias_alvo: float):
-    instrumentos = cd.obter_instrumentos_opcoes(currency)
-    vencimento_alvo = cd.escolher_vencimento_curto(instrumentos, dias_alvo)
-    cadeia = cd.montar_cadeia(instrumentos, vencimento_alvo)
-    return cadeia, vencimento_alvo
+@st.cache_data(ttl=TTL_LEITURA, show_spinner=False)
+def _meta_repo(base: str, ativo: str) -> dict:
+    return lr.ler_meta(base, ativo)
 
 
 # ----------------------------------------------------------------------------
@@ -94,19 +91,21 @@ def _cadeia_deribit(currency: str, dias_alvo: float):
 
 def _sidebar():
     st.sidebar.markdown("### ⚙️ Configuração")
-    ativo = st.sidebar.radio("Ativo", ["BTC", "ETH"], horizontal=True)
-    dias_alvo = st.sidebar.slider(
-        "Vencimento-alvo do GEX (dias a partir de hoje)",
-        min_value=0.5, max_value=14.0, value=2.0, step=0.5,
-        help="O painel de GEX usa o vencimento de opções disponível na Deribit "
-             "mais próximo desse número de dias — por padrão, opções CURTAS (~2 dias).")
-    intervalo = st.sidebar.selectbox("Timeframe do gráfico de preço", ["1d", "4h", "1h"], index=0)
+    ativo = st.sidebar.radio("Ativo", ATIVOS, horizontal=True)
+
+    with st.sidebar.expander("Repositório de dados", expanded=False):
+        base = st.text_input(
+            "URL base (raw.githubusercontent.com/.../data)",
+            value=lr.GITHUB_RAW_BASE_PADRAO,
+            help="Aponta pra pasta data/ do repositório público onde o "
+                 "GitHub Actions publica os dados coletados. Só mude se "
+                 "você tiver feito um fork do repositório.")
 
     auto = False
     if _AUTOREFRESH_OK:
-        auto = st.sidebar.checkbox("Atualizar automaticamente (30s)", value=False)
+        auto = st.sidebar.checkbox("Atualizar automaticamente (60s)", value=False)
         if auto:
-            st_autorefresh(interval=30_000, key="auto_refresh_tick")
+            st_autorefresh(interval=60_000, key="auto_refresh_tick")
     else:
         st.sidebar.caption(
             "💡 Instale `streamlit-autorefresh` (pip install streamlit-autorefresh) "
@@ -116,9 +115,9 @@ def _sidebar():
         st.cache_data.clear()
 
     st.sidebar.caption(
-        "Cotações: Binance (REST, público) · Opções: Deribit (REST, público). "
-        f"Cache local: {TTL_COTACOES}s (cotações) / {TTL_OPCOES}s (opções).")
-    return ativo, dias_alvo, intervalo
+        "Dados publicados via GitHub Actions (coletar_dados.py) a partir da "
+        f"Binance e Deribit. Cache local de leitura: {TTL_LEITURA}s.")
+    return ativo, base
 
 
 # ----------------------------------------------------------------------------
@@ -186,31 +185,37 @@ def _metricas_gex(gex: dict, ticker: str, vencimento_alvo: pd.Timestamp):
 
 def main():
     _injetar_tema()
-    ativo, dias_alvo, intervalo = _sidebar()
-
-    symbol = cd.ATIVOS[ativo]["binance_symbol"]
-    currency = cd.ATIVOS[ativo]["deribit_currency"]
+    ativo, base = _sidebar()
 
     try:
-        spot = _preco_atual_binance(symbol)
-        precos = _precos_binance(symbol, intervalo, 300)
+        meta = _meta_repo(base, ativo)
+        precos = _precos_repo(base, ativo)
+        cadeia_completa = _opcoes_repo(base, ativo)
         precos_ind = m.calcular_indicadores_precos(precos)
     except Exception as e:
         st.error(
-            f"Falha ao buscar cotações na Binance ({symbol}): {e}\n\n"
-            "O app já tenta automaticamente vários espelhos públicos da Binance "
-            "(data-api.binance.vision, api1-4.binance.com, api.binance.com) — se "
-            "todos falharem, é provável que sua rede/provedor esteja bloqueando "
-            "esses domínios (firewall corporativo, VPN, etc). Teste abrir "
-            "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCUSDT "
-            "direto no navegador para confirmar.")
+            f"Falha ao ler os dados publicados no repositório para {ativo}: {e}\n\n"
+            "Confirme na aba **Actions** do repositório que o workflow de coleta "
+            "já rodou com sucesso pelo menos uma vez (ele publica os arquivos em "
+            "`data/`). Se você acabou de configurar o repositório, rode o "
+            "workflow manualmente (\"Run workflow\") e aguarde ele terminar.")
         return
 
-    try:
-        cadeia, vencimento_alvo = _cadeia_deribit(currency, dias_alvo)
-    except Exception as e:
-        st.error(f"Falha ao buscar opções na Deribit ({currency}): {e}")
+    spot = float(meta.get("spot", precos["fechamento"].iloc[-1]))
+
+    vencimentos_disponiveis = sorted(cadeia_completa["vencimento"].drop_duplicates())
+    if not vencimentos_disponiveis:
+        st.error(f"Nenhum vencimento de opções encontrado nos dados publicados para {ativo}.")
         return
+
+    with st.sidebar:
+        vencimento_alvo = st.selectbox(
+            "Vencimento (GEX)", vencimentos_disponiveis,
+            format_func=lambda v: v.strftime("%d/%m/%Y %H:%M UTC"),
+            help="Vencimentos que o GitHub Actions coletou — por padrão, o mais "
+                 "próximo de 'hoje + 2 dias' (opções curtas) e seus vizinhos.")
+
+    cadeia = cadeia_completa[cadeia_completa["vencimento"] == vencimento_alvo].copy()
 
     try:
         gex = m.calcular_gex(cadeia, spot)
@@ -219,11 +224,13 @@ def main():
         st.error(f"Falha ao calcular GEX/métricas do contrato: {e}")
         return
 
+    atualizado_em = meta.get("atualizado_em", "?")
     st.caption(
-        f"**{ativo}USDT** · Spot US$ {spot:,.2f} (Binance) · "
-        f"atualizado às {datetime.now().strftime('%H:%M:%S')} · "
+        f"**{ativo}USDT** · Spot US$ {spot:,.2f} (Binance, no momento da coleta) · "
+        f"dados coletados em {atualizado_em} · "
         f"opções: {len(cadeia)} contratos no vencimento "
-        f"{vencimento_alvo:%d/%m %H:%M UTC} (Deribit)")
+        f"{vencimento_alvo:%d/%m %H:%M UTC} (Deribit) · lido às "
+        f"{datetime.now().strftime('%H:%M:%S')}")
 
     col_esq, col_dir = st.columns([2, 3], gap="large")
 
@@ -246,8 +253,9 @@ def main():
                 'calls e VENDIDOS em puts (padrão usado por trackers públicos de GEX). O GEX é '
                 'calculado a partir das gregas (gamma) e do open interest reportados pela '
                 'própria Deribit para cada contrato, combinados com o preço à vista (spot) da '
-                'Binance. Ajuste o sinal no código se sua leitura de mercado indicar o '
-                'oposto para este ativo.</div>')
+                'Binance no momento da coleta. Ajuste o sinal no código se sua leitura de '
+                'mercado indicar o oposto para este ativo. Dados publicados periodicamente via '
+                'GitHub Actions — não são um feed em tempo real tick-a-tick.</div>')
 
 
 if __name__ == "__main__":
