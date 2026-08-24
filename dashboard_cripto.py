@@ -12,8 +12,13 @@ CORES = {
     "texto": "#e8eaf0", "fraco": "#8b93a7",
     "alta": "#2ecc71", "baixa": "#e74c3c", "neutro": "#4d9dff",
     "call": "#2ecc71", "put": "#e74c3c",
+    "roxo": "#c25bef", "rosa": "#e0568c",
 }
 FONTE = "JetBrains Mono, monospace"
+
+JANELA_PERCENTIL_PADRAO = 365  # janela rolante (P20/P80) — mesma janela usada nas
+                                # bandas de desvio-padrão, equivalente cripto do
+                                # rolling(252) usado no dashboard de ações (streamlitB3)
 
 
 # ---------------------------------------------------------------------------
@@ -104,58 +109,131 @@ def fig_gex_profile(gex: dict, ticker: str) -> go.Figure:
     return _layout_base(fig, altura=400)
 
 
+def _rolling_percentis(serie: pd.Series, janela: int = JANELA_PERCENTIL_PADRAO,
+                        p_baixo: float = 0.2, p_alto: float = 0.8):
+    """Percentis móveis (rolling) de uma série (ex.: HV ou RSI), calculados sobre uma
+    janela de `janela` períodos (padrão: 365 — janela rolante-padrão cripto, equivalente
+    ao rolling(252) usado no dashboard de ações de referência).
+
+    `min_periods` menor que a janela cheia permite que as faixas P20/P80 já apareçam
+    no início da série, mesmo antes de existirem 365 observações — evita um trecho
+    inicial todo em branco (NaN) no gráfico.
+    """
+    min_periodos = max(20, janela // 5)
+    p20 = serie.rolling(janela, min_periods=min_periodos).quantile(p_baixo)
+    p80 = serie.rolling(janela, min_periods=min_periodos).quantile(p_alto)
+    return p20, p80
+
+
 def fig_preco_vol_rsi(precos_ind: pd.DataFrame, bandas: pd.DataFrame, ticker: str,
-                       period: int) -> go.Figure:
-    """3 painéis empilhados: (1) Preço + média móvel (seletor) + bandas de
-    desvio-padrão rolante; (2) Volatilidade histórica anualizada + bandas de
-    quartil 0.2/0.8 em janela rolante de 365 períodos; (3) RSI curto (14) e
-    RSI de janela rolante longa (365 períodos)."""
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                         row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.04)
+                       period: int, janela_percentil: int = JANELA_PERCENTIL_PADRAO) -> go.Figure:
+    """3 painéis empilhados, réplica fiel do gráfico de referência (streamlitB3 /
+    gerar_dashboard._fig_direita):
 
-    # ---- Painel 1: preço + média móvel + bandas de desvio-padrão ----
-    fig.add_scatter(x=bandas["data"], y=bandas["banda+3"], name="+3σ",
-                     line=dict(color=CORES["baixa"], width=0.8, dash="dot"),
+    (1) Preço + baseline (média móvel simples de `period` períodos sobre o log-preço
+        normalizado) + bandas de desvio-padrão ROLANTE (±1/2/3σ, sem preenchimento,
+        com opacidade em degradê) + marcadores coloridos nos pontos onde o fechamento
+        se afasta da baseline: roxo (≥3σ/≤-3σ), azul (≥1σ/≤-2σ) e rosa (≥1σ/≤-1σ) —
+        prioridade roxo > azul > rosa quando as faixas se sobrepõem.
+    (2) Volatilidade histórica anualizada + faixas de percentil MÓVEL (P20/P80,
+        janela rolante de `janela_percentil` períodos) calculadas em cima da própria
+        série de volatilidade — mostra se a vol de hoje está "cara" ou "barata" frente
+        ao regime recente do próprio ativo.
+    (3) RSI curto (14) + RSI de janela rolante longa (365) + as mesmas faixas de
+        percentil móvel (P20/P80), agora calculadas em cima do RSI(14) — complementa
+        as linhas fixas de sobrecompra/sobrevenda (70/30).
+    """
+    fig = make_subplots(
+        rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+        row_heights=[0.42, 0.28, 0.30],
+        subplot_titles=(
+            f"{ticker} — Preço",
+            f"Volatilidade Histórica (30 dias, anualizada) — Baseada em Retornos "
+            f"(com P20/P80 móveis, janela {janela_percentil})",
+            f"RSI (14) (com P20/P80 móveis, janela {janela_percentil})",
+        ),
+    )
+
+    # ---- Painel 1: preço + baseline (média móvel) + bandas de desvio-padrão ----
+    for n in (3, 2, 1):
+        fig.add_scatter(x=bandas["data"], y=bandas[f"banda-{n}"], name=f"Banda -{n}",
+                         line=dict(color=CORES["baixa"], width=1, dash="dot"),
+                         opacity=0.35 + 0.15 * (3 - n), showlegend=False, row=1, col=1)
+    for n in (1, 2, 3):
+        fig.add_scatter(x=bandas["data"], y=bandas[f"banda+{n}"], name=f"Banda +{n}",
+                         line=dict(color=CORES["alta"], width=1, dash="dot"),
+                         opacity=0.35 + 0.15 * (3 - n), showlegend=False, row=1, col=1)
+    fig.add_scatter(x=bandas["data"], y=bandas["banda_0"], name=f"Baseline (MM {period})",
+                     line=dict(color=CORES["neutro"], width=1.4, dash="dash"),
                      showlegend=False, row=1, col=1)
-    fig.add_scatter(x=bandas["data"], y=bandas["banda-3"], name="-3σ",
-                     line=dict(color=CORES["baixa"], width=0.8, dash="dot"),
-                     showlegend=False, row=1, col=1)
-    fig.add_scatter(x=bandas["data"], y=bandas["banda+2"], name="+2σ",
-                     line=dict(color="#e0b23f", width=0.9, dash="dash"),
-                     showlegend=False, row=1, col=1)
-    fig.add_scatter(x=bandas["data"], y=bandas["banda-2"], name="-2σ",
-                     line=dict(color="#e0b23f", width=0.9, dash="dash"),
-                     showlegend=False, row=1, col=1)
-    fig.add_scatter(x=bandas["data"], y=bandas["banda-1"], name="±1σ",
-                     line=dict(color=CORES["alta"], width=1), showlegend=False, row=1, col=1)
-    fig.add_scatter(x=bandas["data"], y=bandas["banda+1"], name="±1σ (janela rolante 365)",
-                     line=dict(color=CORES["alta"], width=1), fill="tonexty",
-                     fillcolor="rgba(46,204,113,0.08)", row=1, col=1)
-    fig.add_scatter(x=bandas["data"], y=bandas["banda_0"], name=f"Média móvel ({period})",
-                     line=dict(color=CORES["neutro"], width=1.3, dash="dash"), row=1, col=1)
     fig.add_scatter(x=precos_ind["data"], y=precos_ind["fechamento"], name="Fechamento",
-                     line=dict(color=CORES["texto"], width=1.7), row=1, col=1)
+                     line=dict(color=CORES["texto"], width=1.6), row=1, col=1)
 
-    # ---- Painel 2: volatilidade histórica + bandas de quartil rolantes ----
-    fig.add_scatter(x=precos_ind["data"], y=precos_ind["hv_q80_365"], name="Quartil 0.8",
-                     line=dict(color=CORES["baixa"], width=0.9, dash="dot"),
-                     showlegend=True, row=2, col=1)
-    fig.add_scatter(x=precos_ind["data"], y=precos_ind["hv_q20_365"], name="Quartil 0.2 - 0.8 (rolante, 365)",
-                     line=dict(color=CORES["alta"], width=0.9, dash="dot"), fill="tonexty",
-                     fillcolor="rgba(77,157,255,0.10)", row=2, col=1)
+    # marcadores de desvio: fechamento vs baseline, em unidades de desvio-padrão
+    fechamento = precos_ind["fechamento"].reset_index(drop=True)
+    banda0 = bandas["banda_0"].reset_index(drop=True)
+    std = (bandas["banda+1"] - bandas["banda_0"]).reset_index(drop=True)
+    desvio = (fechamento - banda0) / std
+    datas = precos_ind["data"].reset_index(drop=True)
+
+    mask_roxo = (desvio >= 3) | (desvio <= -3)
+    mask_azul = ~mask_roxo & ((desvio >= 1) | (desvio <= -2))
+    mask_rosa = ~mask_roxo & ~mask_azul & ((desvio >= 1) | (desvio <= -1))
+
+    for mask, cor, nome in (
+        (mask_roxo, CORES["roxo"], "≥3σ / ≤-3σ"),
+        (mask_azul, CORES["neutro"], "≥1σ / ≤-2σ"),
+        (mask_rosa, CORES["rosa"], "≥1σ / ≤-1σ"),
+    ):
+        if mask.any():
+            fig.add_scatter(
+                x=datas[mask], y=fechamento[mask], mode="markers", name=nome,
+                marker=dict(color=cor, size=6, line=dict(color=CORES["fundo"], width=0.5)),
+                showlegend=False, row=1, col=1,
+            )
+
+    # ---- Painel 2: volatilidade histórica + faixas de percentil móvel (P20/P80) ----
     fig.add_scatter(x=precos_ind["data"], y=precos_ind["hv_anualizada"], name="Vol. hist. anualizada",
-                     line=dict(color=CORES["neutro"], width=1.5), row=2, col=1)
+                     line=dict(color=CORES["neutro"], width=1.6), row=2, col=1)
 
-    # ---- Painel 3: RSI curto (14) + RSI de janela rolante longa (365) ----
+    hv_p20, hv_p80 = _rolling_percentis(precos_ind["hv_anualizada"], janela_percentil)
+    fig.add_scatter(x=precos_ind["data"], y=hv_p80, name=f"HV P80 (rolante {janela_percentil})",
+                     line=dict(color=CORES["roxo"], width=1, dash="dot"), showlegend=False, row=2, col=1)
+    fig.add_scatter(x=precos_ind["data"], y=hv_p20, name=f"HV P20 (rolante {janela_percentil})",
+                     line=dict(color=CORES["rosa"], width=1, dash="dot"), showlegend=False, row=2, col=1)
+    if pd.notna(hv_p80.iloc[-1]):
+        fig.add_annotation(x=precos_ind["data"].iloc[-1], y=hv_p80.iloc[-1], xref="x2", yref="y2",
+                            text="P80", showarrow=False, font=dict(size=9, color=CORES["roxo"]),
+                            xanchor="left", xshift=8)
+    if pd.notna(hv_p20.iloc[-1]):
+        fig.add_annotation(x=precos_ind["data"].iloc[-1], y=hv_p20.iloc[-1], xref="x2", yref="y2",
+                            text="P20", showarrow=False, font=dict(size=9, color=CORES["rosa"]),
+                            xanchor="left", xshift=8)
+
+    # ---- Painel 3: RSI curto (14) + RSI de janela rolante longa (365) + percentis móveis do RSI(14) ----
     fig.add_scatter(x=precos_ind["data"], y=precos_ind["rsi"], name="RSI(14)",
-                     line=dict(color="#c98bf0", width=1.4), row=3, col=1)
+                     line=dict(color=CORES["rosa"], width=1.6), row=3, col=1)
     fig.add_scatter(x=precos_ind["data"], y=precos_ind["rsi_365"], name="RSI(365, rolante)",
                      line=dict(color=CORES["neutro"], width=1.2, dash="dash"), row=3, col=1)
-    fig.add_hline(y=70, line_dash="dot", line_color=CORES["baixa"], row=3, col=1)
-    fig.add_hline(y=30, line_dash="dot", line_color=CORES["alta"], row=3, col=1)
+    fig.add_hline(y=70, line=dict(color=CORES["neutro"], width=1, dash="dot"), row=3, col=1)
+    fig.add_hline(y=30, line=dict(color=CORES["roxo"], width=1, dash="dot"), row=3, col=1)
 
-    fig.update_layout(title=f"Preço, Volatilidade & RSI — {ticker}")
+    rsi_p20, rsi_p80 = _rolling_percentis(precos_ind["rsi"], janela_percentil)
+    fig.add_scatter(x=precos_ind["data"], y=rsi_p80, name=f"RSI P80 (rolante {janela_percentil})",
+                     line=dict(color=CORES["roxo"], width=1, dash="dot"), showlegend=False, row=3, col=1)
+    fig.add_scatter(x=precos_ind["data"], y=rsi_p20, name=f"RSI P20 (rolante {janela_percentil})",
+                     line=dict(color=CORES["rosa"], width=1, dash="dot"), showlegend=False, row=3, col=1)
+    if pd.notna(rsi_p80.iloc[-1]):
+        fig.add_annotation(x=precos_ind["data"].iloc[-1], y=rsi_p80.iloc[-1], xref="x3", yref="y3",
+                            text="P80", showarrow=False, font=dict(size=9, color=CORES["roxo"]),
+                            xanchor="left", xshift=8)
+    if pd.notna(rsi_p20.iloc[-1]):
+        fig.add_annotation(x=precos_ind["data"].iloc[-1], y=rsi_p20.iloc[-1], xref="x3", yref="y3",
+                            text="P20", showarrow=False, font=dict(size=9, color=CORES["rosa"]),
+                            xanchor="left", xshift=8)
+
+    fig.update_layout(title=f"Preço, Volatilidade & RSI — {ticker}", showlegend=False)
     fig.update_yaxes(title="Preço (US$)", row=1, col=1)
     fig.update_yaxes(title="Vol. anual. (%)", row=2, col=1)
     fig.update_yaxes(title="RSI", range=[0, 100], row=3, col=1)
-    return _layout_base(fig, altura=620)
+    return _layout_base(fig, altura=780)

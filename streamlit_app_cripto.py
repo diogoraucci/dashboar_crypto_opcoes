@@ -288,15 +288,17 @@ def main():
             st.html(
                 '<div class="disclaimer">Painel de preço: baseline (linha azul tracejada) = '
                 f'média móvel simples de {period} períodos sobre o log-preço normalizado '
-                '(seletor "Período (Média Móvel)" na sidebar); bandas verde/amarela/vermelha = '
+                '(seletor "Período (Média Móvel)" na sidebar); bandas pontilhadas verde/vermelha = '
                 'baseline &plusmn; 1/2/3 desvios-padrão em JANELA ROLANTE de 365 períodos de '
-                '(log-preço &minus; baseline), convertidas de volta pra escala de preço (US$). '
+                '(log-preço &minus; baseline), convertidas de volta pra escala de preço (US$); '
+                'pontos coloridos sobre o fechamento = dias em que o preço se afastou da baseline '
+                '(roxo &ge;3&sigma;, azul &ge;1&sigma;/&le;-2&sigma;, rosa &ge;1&sigma;/&le;-1&sigma;). '
                 'Painel de volatilidade: linha = volatilidade histórica anualizada (rolling 30 '
-                'dias, anualizada por &radic;365); banda sombreada = quantis 0.2 e 0.8 da própria '
-                'volatilidade, calculados em JANELA ROLANTE de 365 períodos — mostra se a vol de '
-                'hoje está alta/baixa frente ao regime recente. Painel de RSI: RSI(14) padrão de '
-                'mercado + RSI(365) calculado com janela rolante longa, pra momentum de prazo '
-                'mais largo.</div>')
+                'dias, anualizada por &radic;365); linhas pontilhadas P80/P20 = percentis 0.8 e 0.2 '
+                'da própria volatilidade, calculados em JANELA ROLANTE de 365 períodos — mostra se a '
+                'vol de hoje está alta/baixa frente ao regime recente. Painel de RSI: RSI(14) padrão '
+                'de mercado (com as mesmas faixas móveis P80/P20 calculadas sobre ele) + RSI(365) '
+                'calculado com janela rolante longa, pra momentum de prazo mais largo.</div>')
             st.plotly_chart(gd.fig_gex_profile(gex, f"{ativo}USDT"),
                              use_container_width=True, config={"displayModeBar": False},
                              key="fig_gex")
