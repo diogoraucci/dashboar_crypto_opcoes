@@ -37,4 +37,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "chore: atualizar dados de mercado [skip ci]"
+          # Se alguém deu commit no repo (ex: edição manual via GitHub web) enquanto
+          # este job rodava, o checkout local fica desatualizado e o push simples
+          # falha com "fetch first". Rebase busca o que mudou remotamente e reaplica
+          # este commit de dados por cima, sem perder nem o commit manual nem o da coleta.
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
