@@ -98,13 +98,7 @@ def _sidebar():
         help="Janela da média móvel usada como baseline das bandas de "
              "desvio-padrão no gráfico de preço.")
 
-    '''with st.sidebar.expander("Repositório de dados", expanded=False):
-        base = st.text_input(
-            "URL base (raw.githubusercontent.com/.../data)",
-            value=lr.GITHUB_RAW_BASE_PADRAO,
-            help="Aponta pra pasta data/ do repositório público onde o "
-                 "GitHub Actions publica os dados coletados. Só mude se "
-                 "você tiver feito um fork do repositório.")'''
+
 
     auto = False
     if _AUTOREFRESH_OK:
