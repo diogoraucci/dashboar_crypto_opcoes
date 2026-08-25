@@ -35,11 +35,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # data/ é sobrescrito por inteiro a cada coleta (não é um diff
+          # incremental) — então "última coleta vence" é sempre a estratégia
+          # certa, e não faz sentido tentar reconciliar histórico com rebase
+          # (isso só geraria conflito). Em vez disso: busca o que há de mais
+          # recente no remoto, avança o ponteiro do branch local pra lá
+          # (--soft não mexe na working tree, então os arquivos que acabaram
+          # de ser gerados em data/ continuam intactos no disco) e comita
+          # nosso resultado por cima disso.
+          git fetch origin "${GITHUB_REF_NAME}"
+          git reset --soft "origin/${GITHUB_REF_NAME}"
           git add data/
           git diff --cached --quiet || git commit -m "chore: atualizar dados de mercado [skip ci]"
-          # Se alguém deu commit no repo (ex: edição manual via GitHub web) enquanto
-          # este job rodava, o checkout local fica desatualizado e o push simples
-          # falha com "fetch first". Rebase busca o que mudou remotamente e reaplica
-          # este commit de dados por cima, sem perder nem o commit manual nem o da coleta.
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          git push origin "HEAD:${GITHUB_REF_NAME}"
