@@ -98,7 +98,13 @@ def _sidebar():
         help="Janela da média móvel usada como baseline das bandas de "
              "desvio-padrão no gráfico de preço.")
 
-
+    with st.sidebar.expander("Repositório de dados", expanded=False):
+        base = st.text_input(
+            "URL base (raw.githubusercontent.com/.../data)",
+            value=lr.GITHUB_RAW_BASE_PADRAO,
+            help="Aponta pra pasta data/ do repositório público onde o "
+                 "GitHub Actions publica os dados coletados. Só mude se "
+                 "você tiver feito um fork do repositório.")
 
     auto = False
     if _AUTOREFRESH_OK:
@@ -113,9 +119,9 @@ def _sidebar():
     if st.sidebar.button("🔄 Atualizar agora", width="stretch"):
         st.cache_data.clear()
 
-    '''st.sidebar.caption(
-        "Dados publicados via "
-        f"Binance e Deribit. Cache local de leitura: {TTL_LEITURA}s.")'''
+    st.sidebar.caption(
+        "Dados publicados via GitHub Actions (coletar_dados.py) a partir da "
+        f"Binance e Deribit. Cache local de leitura: {TTL_LEITURA}s.")
     return ativo, base, period
 
 
@@ -280,16 +286,24 @@ def main():
                              use_container_width=True, config={"displayModeBar": False},
                              key="fig_preco_vol_rsi")
             st.html(
-                '<div class="disclaimer"></div>')
+                '<div class="disclaimer">Painel de preço: baseline (linha azul tracejada) = '
+                f'média móvel simples de {period} períodos sobre o log-preço normalizado '
+                '(seletor "Período (Média Móvel)" na sidebar); bandas verde/amarela/vermelha = '
+                'baseline &plusmn; 1/2/3 desvios-padrão em JANELA ROLANTE de 365 períodos de '
+                '(log-preço &minus; baseline), convertidas de volta pra escala de preço (US$). '
+                'Painel de volatilidade: linha = volatilidade histórica anualizada (rolling 30 '
+                'dias, anualizada por &radic;365); banda sombreada = quantis 0.2 e 0.8 da própria '
+                'volatilidade, calculados em JANELA ROLANTE de 365 períodos — mostra se a vol de '
+                'hoje está alta/baixa frente ao regime recente. Painel de RSI: RSI(14) padrão de '
+                'mercado + RSI(365) calculado com janela rolante longa, pra momentum de prazo '
+                'mais largo.</div>')
             st.plotly_chart(gd.fig_gex_profile(gex, f"{ativo}USDT"),
                              use_container_width=True, config={"displayModeBar": False},
                              key="fig_gex")
             st.html(
                 '<div class="disclaimer">Convenção assumida: dealers líquidos COMPRADOS em '
                 'calls e VENDIDOS em puts (padrão usado por trackers públicos de GEX). O GEX é '
-                'calculado a partir das gregas (gamma) e do open interest reportados pela '
-                'própria Deribit para cada contrato, combinados com o preço à vista (spot) da '
-                'Binance no momento da coleta..</div>')
+                'calculado a partir das gregas (gamma) e do open interest.</div>')
 
 
 if __name__ == "__main__":
