@@ -2,8 +2,11 @@ name: Coleta de dados (Binance + Deribit)
 
 on:
   schedule:
-    # A cada 15 minutos. Cron do GitHub Actions é sempre em UTC.
-    - cron: "*/15 * * * *"
+    # A cada 15 minutos, mas deslocado 7min dos horários "redondos"
+    # (:00/:15/:30/:45), que são os picos de carga documentados pelo GitHub
+    # onde execuções agendadas são mais atrasadas/descartadas. Cron do GitHub
+    # Actions é sempre em UTC.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow" na aba Actions
 
 permissions:
