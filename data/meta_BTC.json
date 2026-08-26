@@ -1,7 +1,7 @@
 {
   "ativo": "BTC",
-  "atualizado_em": "2026-08-26T00:26:36.398779+00:00",
-  "spot": 78547.26,
+  "atualizado_em": "2026-08-26T02:11:06.401791+00:00",
+  "spot": 78765.3,
   "fonte_spot": "binance",
   "fonte_opcoes": "deribit",
   "dias_alvo_vencimento_curto": 2.0,
