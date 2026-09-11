@@ -1,14 +1,14 @@
 {
   "ativo": "BTC",
-  "atualizado_em": "2026-09-11T19:49:44.760177+00:00",
-  "spot": 77316.01,
+  "atualizado_em": "2026-09-11T22:01:11.904904+00:00",
+  "spot": 77035.29,
   "fonte_spot": "binance",
   "fonte_opcoes": "deribit",
   "dias_alvo_vencimento_curto": 2.0,
   "vencimentos_disponiveis": [
-    "2026-09-12T08:00:00+00:00",
     "2026-09-13T08:00:00+00:00",
-    "2026-09-14T08:00:00+00:00"
+    "2026-09-14T08:00:00+00:00",
+    "2026-09-15T08:00:00+00:00"
   ],
-  "n_contratos": 166
+  "n_contratos": 168
 }
