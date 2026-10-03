@@ -1,7 +1,7 @@
 {
   "ativo": "ETH",
-  "atualizado_em": "2026-10-02T23:01:35.905094+00:00",
-  "spot": 2667.01,
+  "atualizado_em": "2026-10-03T01:52:03.623378+00:00",
+  "spot": 2680.01,
   "fonte_spot": "binance",
   "fonte_opcoes": "deribit",
   "dias_alvo_vencimento_curto": 2.0,
