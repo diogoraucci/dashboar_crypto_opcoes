@@ -1,14 +1,14 @@
 {
   "ativo": "ETH",
-  "atualizado_em": "2026-11-02T18:33:34.229288+00:00",
-  "spot": 2253.7,
+  "atualizado_em": "2026-11-03T01:10:54.199469+00:00",
+  "spot": 2260.0,
   "fonte_spot": "binance",
   "fonte_opcoes": "deribit",
   "dias_alvo_vencimento_curto": 2.0,
   "vencimentos_disponiveis": [
-    "2026-11-03T08:00:00+00:00",
     "2026-11-04T08:00:00+00:00",
-    "2026-11-05T08:00:00+00:00"
+    "2026-11-05T08:00:00+00:00",
+    "2026-11-06T08:00:00+00:00"
   ],
-  "n_contratos": 154
+  "n_contratos": 148
 }
